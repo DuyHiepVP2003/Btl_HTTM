@@ -3,53 +3,74 @@ os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.models import load_model
-import matplotlib.pyplot as plt
 import cv2
 import numpy as np
-def load_and_process_image_for_prediction(image_path, target_size=(28, 28)):
-    # Đọc ảnh từ đường dẫn
+import random
+
+def load_and_process_image_for_prediction(image_path, target_size=(64, 64)):
     img = cv2.imread(image_path)
-    
-    # Kiểm tra xem ảnh có được tải không
     if img is None:
         raise ValueError(f"Không thể tải ảnh từ đường dẫn: {image_path}")
-
-    # Chuyển đổi kích thước ảnh
     img = cv2.resize(img, target_size)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) 
+    img_array = np.array(img).astype('float32') / 255.0
+    return np.expand_dims(img_array, axis=0)
 
-    # Chuyển đổi ảnh sang màu xám
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # Chuyển đổi thành ma trận điểm ảnh và thêm một chiều cho kênh
-    img_array = np.array(img).reshape((target_size[0], target_size[1], 1))  # Thêm chiều kênh
-
-    # Chuẩn hóa giá trị pixel
-    img_array = img_array / 255.0
-
-    return np.expand_dims(img_array, axis=0)  # Thêm chiều batch
-
-def is_water_dispenser(image_path, autoencoder, threshold=0.01):
-    # Tiền xử lý ảnh để phù hợp với đầu vào của mô hình
-    processed_image = load_and_process_image_for_prediction(image_path)
+def calculate_mean_reconstruction_error(autoencoder, image_paths, sample_size=20):
+    # Lấy mẫu ngẫu nhiên từ danh sách các đường dẫn ảnh
+    sample_paths = random.sample(image_paths, min(sample_size, len(image_paths)))
     
-    # Dự đoán ảnh tái tạo từ autoencoder
+    reconstruction_errors = []
+    
+    for image_path in sample_paths:
+        processed_image = load_and_process_image_for_prediction(image_path)
+        reconstructed_image = autoencoder.predict(processed_image)
+        error = np.mean(np.abs(processed_image - reconstructed_image))
+        reconstruction_errors.append(error)
+    
+    return np.mean(reconstruction_errors)
+
+def is_water_dispenser(image_path, autoencoder, mean_reconstruction_error, threshold_factor=1.0):
+    processed_image = load_and_process_image_for_prediction(image_path)
     reconstructed_image = autoencoder.predict(processed_image)
     
-    # Tính sai số tái tạo giữa ảnh gốc và ảnh tái tạo
     reconstruction_error = np.mean(np.abs(processed_image - reconstructed_image))
     
     print(f"Sai số tái tạo: {reconstruction_error}")
     
-    # So sánh sai số tái tạo với ngưỡng đã xác định để quyết định
+    threshold = mean_reconstruction_error * threshold_factor
+    
     if reconstruction_error < threshold:
-        return True  # Ảnh có thể là cây nước
+        return True
     else:
-        return False  # Ảnh không phải là cây nước
+        return False
 
+# Tải mô hình
 autoencoder = load_model('autoencoder_model.h5')
-test_image_path = "D:/code/BTL_HTTM/data/14.jpg"
-# Kiểm tra xem ảnh có phải là cây nước hay không
-result = is_water_dispenser(test_image_path, autoencoder)
+
+def get_image_paths(directory):
+    image_paths = []
+    
+    for filename in os.listdir(directory):
+        file_path = os.path.join(directory, filename)
+        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+            image_paths.append(file_path)
+
+    return image_paths
+
+# Thư mục chứa ảnh
+image_directory = "D:/code/BTL_HTTM/data/train"
+
+# Lấy tất cả các đường dẫn ảnh
+image_paths_for_mean_error = get_image_paths(image_directory)
+
+# Tính sai số tái tạo trung bình từ tập dữ liệu huấn luyện
+mean_reconstruction_error = calculate_mean_reconstruction_error(autoencoder, image_paths_for_mean_error)
+print(f'Sai số tái tạo trung bình: {mean_reconstruction_error}')
+
+# Kiểm tra một ảnh cụ thể
+test_image_path = "D:/code/BTL_HTTM/data/test/1.jpg"
+result = is_water_dispenser(test_image_path, autoencoder, mean_reconstruction_error)
 
 if result:
     print("Ảnh là cây nước!")
